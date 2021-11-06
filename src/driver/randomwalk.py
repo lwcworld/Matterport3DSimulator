@@ -1,10 +1,11 @@
-#!/usr/bin/env python3.6
 import MatterSim
 import time
 import math
 import cv2
 import numpy as np
 import copy
+import networkx as nx
+from matplotlib import pyplot as plt
 
 WIDTH = 450
 HEIGHT = 300
@@ -14,7 +15,14 @@ TEXT_COLOR = [230, 40, 40]
 
 print('H / V angle : ', round(HFOV*180/np.pi, 2), '/', round(VFOV*180/np.pi, 2))
 
+# declare cv2 window
 cv2.namedWindow('panoramic RGB')
+
+# # declare plt window
+plt.ion()
+fig = plt.figure()
+ax = fig.add_subplot(111)
+
 
 sim = MatterSim.Simulator()
 sim.setCameraResolution(WIDTH, HEIGHT)
@@ -102,11 +110,34 @@ def get_pano_togo(sim, num_view):
     location, heading, elevation = 0, state.heading, 0
     sim.makeAction([location], [-heading], [elevation])
 
-
     return view_locallist, view_pano, navloc_locallist, navloc_global, navloc_l2g
 
+def update_nav_graph(G, navloc_global):
+    ix_G_dict = nx.get_node_attributes(G, 'ix')
+    for i, navloc in enumerate(navloc_global):
+        ix = navloc.ix
+        if ix not in ix_G_dict.values():
+            id = navloc.viewpointId
+            x, y, z = navloc.x, navloc.y, navloc.z
+            G.add_nodes_from([ix], id=id, pos=(x, y), isrobot=False, isopen=True)
+            if i == 0:
+                ix_o = copy.deepcopy(ix)
+                G.node[ix_o]['isrobot'] = True
+                G.node[ix_o]['isopen'] = False
+            else:
+                G.add_edge(ix_o, ix)
+                G.node[ix_o]['isrobot'] = False
+                G.node[ix_o]['isopen'] = True
+    return G
+
 if __name__ == "__main__":
+    G = nx.Graph()
+    did_vis = False
+    i_log = 0
     while True:
+        if location!=0 or heading!=0 or elevation!=0:
+            did_vis = False
+
         # move
         sim.makeAction([location], [heading], [elevation])
         location, heading, elevation = 0, 0, 0
@@ -116,11 +147,31 @@ if __name__ == "__main__":
         view_list, view_pano, navloc_list, navloc_global, navloc_l2g = get_pano_togo(sim, num_view)
 
 
-        state = sim.getState()[0]
-        # print(state.heading)
-        locations = state.navigableLocations
-        cv2.imshow('panoramic RGB', view_pano)
+        # update navigation graph
+        G = update_nav_graph(G, navloc_global)
+
+        # show panoramic view
+        if did_vis==False:
+            # save and show panoramic view
+            cv2.imwrite('datalog/pano_'+str(i_log)+'.jpg', view_pano)
+            cv2.imshow('panoramic RGB', view_pano)
+
+            # save and show graph data
+            nx.write_gpickle(G, 'datalog/graph_'+str(i_log)+'.gpickle')
+            pos = nx.get_node_attributes(G, 'pos')
+            nx.draw(G, pos=pos, with_labels=True)
+            plt.axis('on')
+            plt.savefig('datalog/graphimg_'+str(i_log)+'.jpg', dpi=300, bbox_inches='tight')
+            nx.draw_networkx(G, pos=pos, with_labels=True, ax=ax)
+            fig.canvas.draw()
+
+            did_vis = True
+            i_log = i_log + 1
+
+        # get key input
         k = cv2.waitKey(1)
+        state = sim.getState()[0]
+        locations = state.navigableLocations
         if k == -1:
             continue
         else:
