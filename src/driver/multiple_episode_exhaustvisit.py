@@ -38,7 +38,11 @@ def get_circle_headings(heading_now, ang_step=90):
         headings.append(1*ang_step*ang2rad)
     return headings
 
-def get_pano_togo(sim, num_view, param_sim):
+def get_navloc_global(sim, param_sim):
+    state = sim.getState()[0]
+    navloc_local = state.navigableLocations
+
+def get_new_info(sim, num_view, param_sim, get_pano=True):
     state = sim.getState()[0]
     headings = get_circle_headings(state.heading, ang_step=360/num_view)
     view_locallist = []
@@ -154,9 +158,8 @@ if __name__ == "__main__":
                  'write_text_togo': False, 'randomwalk': True, 'onlyneighbor': False}
 
     mapname_list = ['17DRP5sb8fy', '1LXtFkjw3qL', '1pXnuDYAj8r', '29hnd4uzFmX', '2azQ1b91cZZ', '2n8kARJN3HM', '2t7WUuJeko7',
-               '5LpN3gDmAk7', '5q7pvUzZiYa', '5ZKStnWn8Zo', '759xd9YjKW5', '7y3sRwLe3Va', '8194nk5LbLH', '82sE5b5pLXE',
-               '8WUmhLawc2A', 'aayBHfsNo7d', 'ac26ZMwG7aT', 'ARNzJeq3xxb', 'B6ByNegPMKs', 'b8cTxDM8gDG', 'cV4RVeZvu5T']
-
+                    '5LpN3gDmAk7', '5q7pvUzZiYa', '5ZKStnWn8Zo', '759xd9YjKW5', '7y3sRwLe3Va', '8194nk5LbLH', '82sE5b5pLXE',
+                    '8WUmhLawc2A', 'aayBHfsNo7d', 'ac26ZMwG7aT', 'ARNzJeq3xxb', 'B6ByNegPMKs', 'b8cTxDM8gDG', 'cV4RVeZvu5T']
 
     max_episode = len(mapname_list)
     max_step = 50000
@@ -184,6 +187,17 @@ if __name__ == "__main__":
         dir_log = 'datalog_roomnav/' + mapname_sample[0]
         create_dir(dir_log)
 
+        # load viewpoint to region matching information
+        dir_house_seg = '/root/mount/Matterport3DSimulator/data/v1/scans/' + mapname_sample[0] + '/house_segmentations/panorama_to_region.txt'
+        dict_viewpoint_to_region = {}
+        house_seg_list = []
+        with open(dir_house_seg) as my_file:
+            for line in my_file:
+                house_seg_list.append(line)
+        for house_seg in house_seg_list:
+            house_seg_split = house_seg.split(' ')
+            dict_viewpoint_to_region[house_seg_split[1]] = house_seg_split[3][0]
+
         # init iteration variables
         i_step = 0
         i_journey = 0
@@ -199,7 +213,7 @@ if __name__ == "__main__":
 
             # get panoramic observation
             num_view = 4
-            view_list, view_pano, navloc_list, navloc_global, navloc_l2g = get_pano_togo(sim, num_view, param_sim)
+            view_list, view_pano, navloc_list, navloc_global, navloc_l2g = get_new_info(sim, num_view, param_sim)
 
             # update navigation graph
             G = update_nav_graph(G, navloc_global)
@@ -213,18 +227,22 @@ if __name__ == "__main__":
                 cv2.imshow('panoramic RGB', view_pano)
 
                 # save & show graph data
-                nx.write_gpickle(G, dir_log+'/graph_'+str(i_episode)+'_'+str(i_step)+'.gpickle')
+                nx.write_gpickle(G, dir_log+'/graph_'+str(i_episode)+'_'+str(state.location.ix)+'.gpickle')
                 pos = nx.get_node_attributes(G, 'pos')
                 colors = [node[1]['color'] for node in G.nodes(data=True)]
                 nx.draw_networkx(G, pos=pos, with_labels=True, ax=ax, node_color=colors)
                 plt.axis('on')
                 fig.canvas.draw()
-                plt.savefig(dir_log+'/graphimg_'+str(i_episode)+'_'+str(i_step)+'.jpg', dpi=300, bbox_inches='tight')
+                plt.savefig(dir_log+'/graphimg_'+str(i_episode)+'_'+str(state.location.ix)+'.jpg', dpi=300, bbox_inches='tight')
 
                 # save related info (.json)
                 viewpoint = state.location.viewpointId
-                info = {"mapname":mapname_sample[0], "viewpoint":viewpoint}
-                with open(dir_log+'/info_'+str(i_episode)+'_'+str(i_step)+'.json', 'w') as fp:
+                info = {"step":i_step,
+                        "node_idx":state.location.ix,
+                        "mapname":mapname_sample[0],
+                        "viewpoint":viewpoint,
+                        "region":dict_viewpoint_to_region[viewpoint]}
+                with open(dir_log+'/info_'+str(i_episode)+'_'+str(state.location.ix)+'.json', 'w') as fp:
                     json.dump(info, fp)
 
                 i_step = i_step + 1
